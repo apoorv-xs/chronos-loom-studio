@@ -20,7 +20,7 @@ Instead of forcing you into a strict timeline from your first draft, Chronos let
 * **Real-time Scrubbing:** Scrubbing the timeline playhead seeks the active video frame and background score tracks in real-time.
 
 ### 3. FCP7 XML Import & Export (Cross-NLE Compatibility)
-* **Roundtrip Portability:** Export your timeline as an industry-standard Final Cut Pro 7 XML file compatible with Premiere Pro, DaVinci Resolve, and Filmora.
+* **Roundtrip Portability:** Export your timeline as an industry-standard Final Cut Pro 7 XML file compatible with Premiere Pro, DaVinci Resolve, and other major NLEs.
 * **Workspace Preservation:** Node positions, notes text, connection routes, and card colors are encoded into `<chronos_metadata>` blocks within the XML, allowing a perfect restoration of your canvas workspace on import.
 * **Zero-Setup Import:** Double-click `.xml` files in the sidebar explorer or drag-and-drop them onto the canvas to instantly load projects.
 
