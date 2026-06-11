@@ -190,6 +190,14 @@ export function generateFcpXml(sequence, connections, framerate = 30, sequenceNa
   
   totalFrames = currentFrame;
   
+  // Serialize chronos node metadata (like sticky notes, positions, and links)
+  const metaObj = {
+    nodes: sequence.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, width: n.width, color: n.color, locked: n.locked, text: n.text })),
+    connections: actualConnections
+  };
+  const jsonMeta = escapeXml(JSON.stringify(metaObj));
+  const metaXml = `\n  <chronos_metadata>${jsonMeta}</chronos_metadata>`;
+
   // Build the complete FCP7 XML markup
   const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xmeml SYSTEM "fcpxml.dtd">
@@ -231,7 +239,7 @@ export function generateFcpXml(sequence, connections, framerate = 30, sequenceNa
         </track>
       </audio>
     </media>
-  </sequence>
+  </sequence>${metaXml}
 </xmeml>
 `;
 

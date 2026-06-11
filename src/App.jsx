@@ -130,8 +130,8 @@ const INITIAL_CONNECTIONS = [
 
 export default function App() {
   // Shared state variables
-  const [nodes, setNodes] = useState(INITIAL_NODES);
-  const [connections, setConnections] = useState(INITIAL_CONNECTIONS);
+  const [nodes, setNodes] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [draggedItem, setDraggedItem] = useState(null); // { kind: 'file'|'directory', handle, name, type }
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [activeFolderHandle, setActiveFolderHandle] = useState(null);

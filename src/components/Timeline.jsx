@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Square, SkipForward, SkipBack, X, Film, AlertCircle, ChevronDown, Download, Scissors, Music, Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Type } from 'lucide-react';
+import { Play, Square, SkipForward, SkipBack, X, Film, AlertCircle, ChevronDown, Download, Upload, Scissors, Music, Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Type } from 'lucide-react';
 import { generateFcpXml } from '../utils/fcpXmlGenerator';
+import { parseFcpXml } from '../utils/fcpXmlParser';
 import { getFilterCss } from './Canvas';
 import { playUISound } from '../utils/audioSynth';
 
@@ -32,6 +33,37 @@ export default function Timeline({
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [trimming, setTrimming] = useState(null);
+
+  const fileInputRef = useRef(null);
+
+  const handleImportXml = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const xmlText = event.target.result;
+        const { nodes: parsedNodes, connections: parsedConnections } = parseFcpXml(xmlText);
+        
+        if (parsedNodes && parsedNodes.length > 0) {
+          playUISound('swell');
+          // Update parent state
+          setNodes(parsedNodes);
+          setConnections(parsedConnections);
+          setCurrentIndex(0);
+          setPlayheadTime(0);
+        } else {
+          alert("No clips found in the imported XML.");
+        }
+      } catch (err) {
+        console.error("Failed to parse imported XML file:", err);
+        alert("Failed to parse imported XML file. Make sure it is a valid Final Cut Pro 7 XML timeline.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   // States and refs for Draggable & Expandable Program Monitor
   const [monitorPos, setMonitorPos] = useState({ x: null, y: null });
@@ -1114,6 +1146,48 @@ export default function Timeline({
                 +
               </button>
             </div>
+
+            <input 
+              type="file" 
+              accept=".xml" 
+              ref={fileInputRef} 
+              onChange={handleImportXml} 
+              style={{ display: 'none' }} 
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="btn-nle-export"
+              title="Import FCP7 XML timeline file"
+              style={{
+                background: 'linear-gradient(135deg, rgba(168, 162, 158, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)',
+                border: '1px solid rgba(168, 162, 158, 0.4)',
+                borderRadius: '6px',
+                color: 'var(--text-primary)',
+                fontWeight: '600',
+                fontSize: '11px',
+                padding: '5px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                marginRight: '2px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(168, 162, 158, 0.25) 0%, rgba(200, 184, 138, 0.12) 100%)';
+                e.currentTarget.style.borderColor = 'rgba(168, 162, 158, 0.7)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(168, 162, 158, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(168, 162, 158, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)';
+                e.currentTarget.style.borderColor = 'rgba(168, 162, 158, 0.4)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <Upload size={12} />
+              Import
+            </button>
 
             <button
               onClick={handleExportXml}
