@@ -33,6 +33,80 @@ export default function Timeline({
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [trimming, setTrimming] = useState(null);
 
+  // States and refs for Draggable & Expandable Program Monitor
+  const [monitorPos, setMonitorPos] = useState({ x: null, y: null });
+  const [isDraggingMonitor, setIsDraggingMonitor] = useState(false);
+  const [monitorWidth, setMonitorWidth] = useState(280);
+  const [isResizingMonitor, setIsResizingMonitor] = useState(false);
+  const monitorDragStartRef = useRef({ mouseX: 0, mouseY: 0, monitorX: 0, monitorY: 0 });
+  const monitorResizeStartRef = useRef({ mouseX: 0, startWidth: 0 });
+
+  const handleMonitorHeaderMouseDown = (e) => {
+    if (e.button !== 0) return;
+    const monitorElement = e.currentTarget.closest('.program-monitor');
+    if (!monitorElement) return;
+    const rect = monitorElement.getBoundingClientRect();
+    const currentX = monitorPos.x !== null ? monitorPos.x : rect.left;
+    const currentY = monitorPos.y !== null ? monitorPos.y : rect.top;
+    monitorDragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      monitorX: currentX,
+      monitorY: currentY
+    };
+    setIsDraggingMonitor(true);
+    e.preventDefault();
+  };
+
+  const handleMonitorResizeMouseDown = (e) => {
+    if (e.button !== 0) return;
+    monitorResizeStartRef.current = {
+      mouseX: e.clientX,
+      startWidth: monitorWidth
+    };
+    setIsResizingMonitor(true);
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isDraggingMonitor) return;
+    const handleMouseMove = (e) => {
+      const deltaX = e.clientX - monitorDragStartRef.current.mouseX;
+      const deltaY = e.clientY - monitorDragStartRef.current.mouseY;
+      const newX = Math.max(10, Math.min(window.innerWidth - 100, monitorDragStartRef.current.monitorX + deltaX));
+      const newY = Math.max(10, Math.min(window.innerHeight - 100, monitorDragStartRef.current.monitorY + deltaY));
+      setMonitorPos({ x: newX, y: newY });
+    };
+    const handleMouseUp = () => {
+      setIsDraggingMonitor(false);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingMonitor]);
+
+  useEffect(() => {
+    if (!isResizingMonitor) return;
+    const handleMouseMove = (e) => {
+      const deltaX = e.clientX - monitorResizeStartRef.current.mouseX;
+      const newWidth = Math.max(160, Math.min(800, monitorResizeStartRef.current.startWidth + deltaX));
+      setMonitorWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      setIsResizingMonitor(false);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingMonitor]);
+
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [playheadTime, setPlayheadTime] = useState(0);
   const [timelineZoom, setTimelineZoom] = useState(12);
@@ -1883,9 +1957,10 @@ export default function Timeline({
           className="glass-panel program-monitor"
           style={{
             position: 'absolute',
-            top: '20px',
-            right: '24px',
-            width: '280px',
+            top: monitorPos.y !== null ? `${monitorPos.y}px` : '20px',
+            left: monitorPos.x !== null ? `${monitorPos.x}px` : undefined,
+            right: monitorPos.x !== null ? undefined : '24px',
+            width: `${monitorWidth}px`,
             borderRadius: '12px',
             border: '1px solid var(--border-glass)',
             background: 'var(--bg-panel)',
@@ -1896,21 +1971,25 @@ export default function Timeline({
             overflow: 'hidden',
             zIndex: 100,
             pointerEvents: 'auto',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+            transition: isDraggingMonitor || isResizingMonitor ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
           }}
           onMouseDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '8px 12px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(0, 0, 0, 0.25)',
-            userSelect: 'none'
-          }}>
+          <div 
+            onMouseDown={handleMonitorHeaderMouseDown}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(0, 0, 0, 0.25)',
+              userSelect: 'none',
+              cursor: isDraggingMonitor ? 'grabbing' : 'grab'
+            }}
+          >
             <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Film size={11} style={{ color: 'var(--accent-cyan)' }} />
               Program Monitor
@@ -1921,6 +2000,7 @@ export default function Timeline({
                   playUISound('swell');
                   setIsPresentationActive(true);
                 }}
+                onMouseDown={(e) => e.stopPropagation()}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -2016,6 +2096,12 @@ export default function Timeline({
               </div>
             )}
           </div>
+
+          {/* Resize Grip */}
+          <div 
+            className="resize-handle"
+            onMouseDown={handleMonitorResizeMouseDown}
+          />
         </div>
       )}
     </>
