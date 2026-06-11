@@ -258,9 +258,9 @@ export default function DirectoryExplorer({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <h2 className="logo-title" style={{ margin: 0 }}>
-          <FolderOpen size={20} style={{ color: 'var(--accent-blue)' }} />
-          Loom Studio
+        <h2 className="logo-title" style={{ margin: 0, fontSize: '15px', letterSpacing: '0.5px' }}>
+          <FolderOpen size={16} style={{ color: 'var(--accent-blue)' }} />
+          CHRONOS // Loom Studio
         </h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button 
