@@ -3,6 +3,8 @@ import { FolderOpen, Film } from 'lucide-react';
 import DirectoryExplorer from './components/DirectoryExplorer';
 import Canvas from './components/Canvas';
 import Timeline from './components/Timeline';
+import { parseFcpXml } from './utils/fcpXmlParser';
+import { playUISound } from './utils/audioSynth';
 
 const INITIAL_NODES = [
   // ── V-TRACK: Main edit (left → right) ────────────────────────
@@ -141,6 +143,25 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [timelineKey, setTimelineKey] = useState(0);
+
+  const handleLoadProjectFile = (xmlText) => {
+    try {
+      const { nodes: parsedNodes, connections: parsedConnections } = parseFcpXml(xmlText);
+      if (parsedNodes && parsedNodes.length > 0) {
+        playUISound('swell');
+        setNodes(parsedNodes);
+        setConnections(parsedConnections);
+        setIsPlaying(false);
+        setTimelineKey(prev => prev + 1);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("Failed to parse imported XML file:", err);
+      return false;
+    }
+  };
 
   // Drag handlers to coordinate explorer dragging actions
   const handleFileDragStart = (e, file) => {
@@ -177,6 +198,7 @@ export default function App() {
         activeNodeId={activeNodeId}
         isTimelineOpen={isTimelineOpen}
         aspectRatio={aspectRatio}
+        onLoadProjectFile={handleLoadProjectFile}
       />
 
       {/* Hide panels when Presentation Mode is running */}
@@ -188,6 +210,7 @@ export default function App() {
           setActiveFolderHandle={setActiveFolderHandle}
           isSidebarOpen={isSidebarOpen}
           onCollapse={() => setIsSidebarOpen(false)}
+          onLoadProjectFile={handleLoadProjectFile}
         />
       )}
       
@@ -230,6 +253,7 @@ export default function App() {
       )}
 
       <Timeline 
+        key={timelineKey}
         nodes={nodes}
         setNodes={setNodes}
         connections={connections}
@@ -247,6 +271,7 @@ export default function App() {
         setActiveNodeId={setActiveNodeId}
         aspectRatio={aspectRatio}
         setAspectRatio={setAspectRatio}
+        onLoadProjectFile={handleLoadProjectFile}
       />
 
       {/* Re-open Timeline Floating Button */}

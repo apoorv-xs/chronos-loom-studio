@@ -45,7 +45,9 @@ export default function Canvas({
   isSidebarOpen,
   isPlaying,
   activeNodeId,
-  isTimelineOpen
+  isTimelineOpen,
+  aspectRatio,
+  onLoadProjectFile
 }) {
   const viewportRef = useRef(null);
   const canvasRef = useRef(null);
@@ -443,6 +445,15 @@ export default function Canvas({
         const fileObj = await fileHandle.getFile();
         const ext = fileObj.name.split('.').pop().toLowerCase();
         
+        if (ext === 'xml') {
+          const text = await fileObj.text();
+          if (onLoadProjectFile) {
+            onLoadProjectFile(text);
+          }
+          setDraggedItem(null);
+          return;
+        }
+
         let blobUrl = '';
         let nodeType = draggedItem.type;
         

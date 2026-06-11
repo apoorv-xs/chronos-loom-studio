@@ -22,7 +22,8 @@ export default function Timeline({
   activeNodeId,
   setActiveNodeId,
   aspectRatio,
-  setAspectRatio
+  setAspectRatio,
+  onLoadProjectFile
 }) {
   const [sequence, setSequence] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -44,17 +45,9 @@ export default function Timeline({
     reader.onload = (event) => {
       try {
         const xmlText = event.target.result;
-        const { nodes: parsedNodes, connections: parsedConnections } = parseFcpXml(xmlText);
-        
-        if (parsedNodes && parsedNodes.length > 0) {
-          playUISound('swell');
-          // Update parent state
-          setNodes(parsedNodes);
-          setConnections(parsedConnections);
-          setCurrentIndex(0);
-          setPlayheadTime(0);
-        } else {
-          alert("No clips found in the imported XML.");
+        const success = onLoadProjectFile(xmlText);
+        if (!success) {
+          alert("Failed to parse imported XML file. Make sure it is a valid Final Cut Pro 7 XML timeline.");
         }
       } catch (err) {
         console.error("Failed to parse imported XML file:", err);

@@ -19,7 +19,8 @@ import { setMuteState, getMuteState, playUISound } from '../utils/audioSynth';
 const MEDIA_EXTENSIONS = {
   video: ['mov', 'mp4', 'webm', 'mkv'],
   audio: ['mp3', 'wav', 'ogg', 'm4a'],
-  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif']
+  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif'],
+  project: ['xml']
 };
 
 export default function DirectoryExplorer({ 
@@ -28,7 +29,8 @@ export default function DirectoryExplorer({
   activeFolderHandle,
   setActiveFolderHandle,
   isSidebarOpen,
-  onCollapse
+  onCollapse,
+  onLoadProjectFile
 }) {
   const [rootHandle, setRootHandle] = useState(null);
   const [currentHandle, setCurrentHandle] = useState(null);
@@ -77,6 +79,7 @@ export default function DirectoryExplorer({
     if (MEDIA_EXTENSIONS.video.includes(ext)) return 'video';
     if (MEDIA_EXTENSIONS.audio.includes(ext)) return 'audio';
     if (MEDIA_EXTENSIONS.image.includes(ext)) return 'image';
+    if (MEDIA_EXTENSIONS.project.includes(ext)) return 'project';
     return null;
   };
 
@@ -182,6 +185,7 @@ export default function DirectoryExplorer({
       case 'video': return <Video size={16} className="text-cyan-400" style={{ color: 'var(--accent-cyan)' }} />;
       case 'audio': return <Music size={16} className="text-pink-400" style={{ color: 'var(--accent-pink)' }} />;
       case 'image': return <ImageIcon size={16} className="text-purple-400" style={{ color: 'var(--accent-purple)' }} />;
+      case 'project': return <File size={16} className="text-amber-500" style={{ color: 'var(--accent-orange)' }} />;
       default: return <File size={16} className="text-gray-400" />;
     }
   };
@@ -363,7 +367,8 @@ export default function DirectoryExplorer({
                 { label: 'All', value: 'all' },
                 { label: 'Videos', value: 'video' },
                 { label: 'Audios', value: 'audio' },
-                { label: 'Images', value: 'image' }
+                { label: 'Images', value: 'image' },
+                { label: 'Projects', value: 'project' }
               ].map(opt => {
                 const isActive = mediaFilter === opt.value;
                 return (
@@ -453,6 +458,18 @@ export default function DirectoryExplorer({
                     className="file-item"
                     draggable
                     onDragStart={(e) => onFileDragStart(e, file)}
+                    onDoubleClick={async () => {
+                      if (file.type === 'project' && onLoadProjectFile) {
+                        try {
+                          const fileObj = await file.handle.getFile();
+                          const text = await fileObj.text();
+                          onLoadProjectFile(text);
+                        } catch (err) {
+                          console.error("Failed to read project XML file:", err);
+                        }
+                      }
+                    }}
+                    title={file.type === 'project' ? "Double-click to load this XML project" : "Drag onto canvas to add media"}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
