@@ -103,7 +103,6 @@ export default function Timeline({
   };
   
   const videoRef = useRef(null);
-  const audioRef = useRef(null);
   const bgAudioRef = useRef(null);
   const timerRef = useRef(null);
   const slideDurationRef = useRef(5000); // 5s default for non-timed media
@@ -357,17 +356,7 @@ export default function Timeline({
     }
   }, [isPresentationActive, isPlaying, playheadTime, backgroundAudioTracks, audioTrackMuted, audioTrackVolume]);
 
-  // Sync audio element for audio-only slides (legacy, when audio is activeNode)
-  useEffect(() => {
-    if (isPresentationActive && activeNode && activeNode.type === 'audio' && audioRef.current) {
-      audioRef.current.currentTime = activeNode.startTime;
-      audioRef.current.volume = audioTrackMuted ? 0 : activeNode.volume;
-      audioRef.current.playbackRate = activeNode.speed || 1.0;
-      if (isPlaying) {
-        audioRef.current.play().catch(err => console.log('Autoplay blocked:', err));
-      }
-    }
-  }, [currentIndex, isPresentationActive, isPlaying, activeNode, audioTrackMuted]);
+
 
   const handleStartPresentation = () => {
     if (sequence.length === 0) return;
@@ -382,7 +371,6 @@ export default function Timeline({
     setIsPlaying(false);
     if (timerRef.current) clearTimeout(timerRef.current);
     if (videoRef.current) videoRef.current.pause();
-    if (audioRef.current) audioRef.current.pause();
     if (bgAudioRef.current) { bgAudioRef.current.pause(); bgAudioRef.current.currentTime = 0; }
   };
 
@@ -411,10 +399,6 @@ export default function Timeline({
       if (videoRef.current) {
         if (nextPlay) videoRef.current.play().catch(err => {});
         else videoRef.current.pause();
-      }
-      if (audioRef.current) {
-        if (nextPlay) audioRef.current.play().catch(err => {});
-        else audioRef.current.pause();
       }
       return nextPlay;
     });
@@ -1706,46 +1690,7 @@ export default function Timeline({
               />
             )}
 
-            {/* AUDIO NODE PLAYBACK */}
-            {activeNode.type === 'audio' && (
-              <div 
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '16px',
-                  color: 'white'
-                }}
-              >
-                <div 
-                  style={{
-                    width: '64px',
-                    height: '64px',
-                    borderRadius: '50%',
-                    background: 'var(--accent-pink)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 0 30px rgba(255, 0, 127, 0.4)',
-                    animation: 'pulse 2s infinite'
-                  }}
-                >
-                  <Music size={24} />
-                </div>
-                <audio 
-                  ref={audioRef}
-                  src={activeNode.url}
-                  autoPlay
-                  volume={activeNode.volume}
-                />
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: '18px' }}>
-                  Playing Soundscape
-                </span>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Audio loops inside clip boundaries
-                </span>
-              </div>
-            )}
+
 
             {/* IMAGE NODE PLAYBACK */}
             {activeNode.type === 'image' && (
