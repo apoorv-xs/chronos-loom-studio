@@ -38,6 +38,7 @@ export default function Timeline({
   const [isExportingVideo, setIsExportingVideo] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState('');
+  const [showCodecWarning, setShowCodecWarning] = useState(false);
 
   const videoSourceRef = useRef(null);
   const audioSourceRef = useRef(null);
@@ -216,7 +217,19 @@ export default function Timeline({
     }
   }, [sequence, connections, exportFramerate]);
 
-  const startVideoExport = async () => {
+  const handleMp4ExportClick = () => {
+    // Check if AAC audio is supported natively inside MP4
+    const hasAacSupport = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2') ||
+                          MediaRecorder.isTypeSupported('video/mp4;codecs="avc1.424028,mp4a.40.2"');
+    
+    if (hasAacSupport) {
+      startVideoExport('mp4');
+    } else {
+      setShowCodecWarning(true);
+    }
+  };
+
+  const startVideoExport = async (requestedFormat = 'mp4') => {
     if (sequence.length === 0) return;
     
     // Stop any current playback
@@ -295,20 +308,55 @@ export default function Timeline({
       
       const combinedStream = new MediaStream(tracks);
       
-      // Select best supported MIME type
-      let mimeType = 'video/webm';
-      let fileExt = '.mp4'; // Download extension
+      // Select best supported MIME type based on requestedFormat
+      let mimeType = 'video/mp4';
+      let fileExt = '.mp4';
       
-      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
-        mimeType = 'video/mp4;codecs=avc1';
-      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
-        mimeType = 'video/mp4';
-      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
-        mimeType = 'video/webm;codecs=vp9,opus';
+      if (requestedFormat === 'webm') {
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+          mimeType = 'video/webm;codecs=vp9,opus';
+        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+          mimeType = 'video/webm;codecs=vp8,opus';
+        } else {
+          mimeType = 'video/webm';
+        }
         fileExt = '.webm';
-      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
-        mimeType = 'video/webm;codecs=vp8,opus';
-        fileExt = '.webm';
+      } else if (requestedFormat === 'mp4') {
+        // High quality MP4 with AAC audio (Twitter/X compatible)
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+          mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+        } else if (MediaRecorder.isTypeSupported('video/mp4;codecs="avc1.424028,mp4a.40.2"')) {
+          mimeType = 'video/mp4;codecs="avc1.424028,mp4a.40.2"';
+        } else {
+          // Standard MP4 fallback
+          mimeType = 'video/mp4';
+        }
+        fileExt = '.mp4';
+      } else if (requestedFormat === 'mp4_opus') {
+        // Explicitly fallback MP4 using Opus audio (warned)
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+          mimeType = 'video/mp4;codecs=avc1';
+        } else {
+          mimeType = 'video/mp4';
+        }
+        fileExt = '.mp4';
+      }
+
+      // Check if chosen mimeType is actually supported, otherwise fallback
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+          mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+          fileExt = '.mp4';
+        } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+          mimeType = 'video/mp4';
+          fileExt = '.mp4';
+        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+          mimeType = 'video/webm;codecs=vp9,opus';
+          fileExt = '.webm';
+        } else {
+          mimeType = 'video/webm';
+          fileExt = '.webm';
+        }
       }
       
       const chunks = [];
@@ -1548,7 +1596,7 @@ export default function Timeline({
                   <button
                     onClick={() => {
                       setShowExportMenu(false);
-                      startVideoExport();
+                      handleMp4ExportClick();
                     }}
                     style={{
                       background: 'none',
@@ -1569,6 +1617,31 @@ export default function Timeline({
                   >
                     <Film size={12} style={{ color: 'var(--accent-orange)' }} />
                     Export MP4 Video (.mp4)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      startVideoExport('webm');
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '8px 10px',
+                      color: 'var(--text-primary)',
+                      fontSize: '11px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    <Film size={12} style={{ color: 'var(--accent-pink)' }} />
+                    Export WebM Video (.webm)
                   </button>
                 </div>
               )}
@@ -2604,6 +2677,120 @@ export default function Timeline({
             className="resize-handle"
             onMouseDown={handleMonitorResizeMouseDown}
           />
+        </div>
+      )}
+
+      {showCodecWarning && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(5, 7, 10, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-body)',
+            backdropFilter: 'blur(10px)',
+            pointerEvents: 'auto'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div 
+            className="glass-panel"
+            style={{
+              width: '480px',
+              padding: '30px',
+              borderRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              border: '1px solid var(--border-glass-glow)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
+              textAlign: 'center'
+            }}
+          >
+            <AlertCircle size={40} style={{ color: 'var(--accent-orange)', marginBottom: '16px' }} />
+            
+            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, marginBottom: '12px' }}>
+              Audio Codec Compatibility
+            </h3>
+            
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '24px' }}>
+              Your browser does not support native <strong>AAC audio encoding</strong> in MP4 files. 
+              Exporting to MP4 will fall back to <strong>Opus audio</strong>, which is <strong>not supported</strong> by social media platforms like <strong>Twitter/X</strong>.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+              <button
+                onClick={() => {
+                  setShowCodecWarning(false);
+                  startVideoExport('webm');
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, var(--accent-orange) 0%, var(--accent-pink) 100%)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: 'var(--bg-primary)',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  padding: '12px 20px',
+                  cursor: 'pointer',
+                  transition: 'transform 0.2s, opacity 0.2s',
+                  outline: 'none'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                Export as WebM (.webm) — Recommended for Twitter/X
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowCodecWarning(false);
+                  startVideoExport('mp4_opus');
+                }}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-glass)',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  fontWeight: '500',
+                  fontSize: '12px',
+                  padding: '10px 20px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s',
+                  outline: 'none'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'}
+              >
+                Export as MP4 Anyway (Opus Audio)
+              </button>
+              
+              <button
+                onClick={() => setShowCodecWarning(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '12px',
+                  padding: '8px',
+                  cursor: 'pointer',
+                  transition: 'color 0.2s',
+                  outline: 'none'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
