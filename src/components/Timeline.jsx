@@ -191,7 +191,7 @@ export default function Timeline({
     return { width: '960px', height: '540px', maxHeight: '80vh', maxWidth: '95vw', aspectRatio: '16/9' };
   };
 
-  const handleExportXml = () => {
+  const handleExportXml = useCallback(() => {
     if (sequence.length === 0) return;
     try {
       const xmlString = generateFcpXml(sequence, connections, exportFramerate, "Chronos Master Timeline");
@@ -207,7 +207,26 @@ export default function Timeline({
     } catch (err) {
       console.error('Failed to generate or download FCP XML:', err);
     }
-  };
+  }, [sequence, connections, exportFramerate]);
+
+  // Intercept Ctrl+S / Cmd+S to export the XML project file
+  useEffect(() => {
+    const handleSaveShortcut = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
+        e.preventDefault();
+        if (sequence.length > 0) {
+          playUISound('swell');
+          handleExportXml();
+        } else {
+          playUISound('alert');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleSaveShortcut);
+    return () => {
+      window.removeEventListener('keydown', handleSaveShortcut);
+    };
+  }, [sequence, handleExportXml]);
   
   const videoRef = useRef(null);
   const bgAudioRef = useRef(null);
