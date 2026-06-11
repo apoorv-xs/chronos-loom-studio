@@ -123,15 +123,15 @@ export default function Timeline({
     return map;
   }, [visualSequence, connections, nodes]);
 
-  // Sync active node ID to parent state — use visual sequence for presentation slides
-  const activeNode = isPresentationActive ? visualSequence[currentIndex] : sequence[currentIndex];
+  // Sync active node ID to parent state — use visual sequence for active tracking
+  const activeVisualNode = visualSequence[currentIndex];
   useEffect(() => {
-    if (isPresentationActive && activeNode) {
-      setActiveNodeId(activeNode.id);
+    if (activeVisualNode) {
+      setActiveNodeId(activeVisualNode.id);
     } else {
       setActiveNodeId(null);
     }
-  }, [activeNode, isPresentationActive, setActiveNodeId]);
+  }, [activeVisualNode, setActiveNodeId]);
 
   // Build the playback sequence based on connections (Topological path traversal)
   useEffect(() => {
@@ -203,14 +203,9 @@ export default function Timeline({
 
   // Handle active slide transitions on slide change
   useEffect(() => {
-    if (!isPresentationActive) {
-      setActiveTransition(null);
-      return;
-    }
-    
-    if (currentIndex > 0 && sequence[currentIndex - 1] && sequence[currentIndex]) {
-      const prev = sequence[currentIndex - 1];
-      const curr = sequence[currentIndex];
+    if (currentIndex > 0 && visualSequence[currentIndex - 1] && visualSequence[currentIndex]) {
+      const prev = visualSequence[currentIndex - 1];
+      const curr = visualSequence[currentIndex];
       const conn = connections.find(c => c.from === prev.id && c.to === curr.id);
       if (conn && conn.transition && conn.transition !== 'cut' && conn.transition !== 'none') {
         setActiveTransition(conn.transition);
@@ -223,19 +218,19 @@ export default function Timeline({
       }
     }
     setActiveTransition(null);
-  }, [currentIndex, sequence, connections, isPresentationActive]);
+  }, [currentIndex, visualSequence, connections]);
 
-  // Handle slide transitions and active subtitle scanning
+  // Handle active subtitle scanning and non-video image timers
   useEffect(() => {
-    if (!isPresentationActive || !activeNode) {
+    if (!activeVisualNode) {
       setActiveSubtitle('');
       return;
     }
 
     // Look for any text nodes/sticky notes connected to the active node
     const connectedStickies = connections
-      .filter(c => c.from === activeNode.id || c.to === activeNode.id)
-      .map(c => c.from === activeNode.id ? c.to : c.from)
+      .filter(c => c.from === activeVisualNode.id || c.to === activeVisualNode.id)
+      .map(c => c.from === activeVisualNode.id ? c.to : c.from)
       .map(id => nodes.find(n => n.id === id))
       .filter(n => n && n.type === 'sticky');
 
@@ -249,32 +244,66 @@ export default function Timeline({
     if (timerRef.current) clearTimeout(timerRef.current);
 
     if (isPlaying) {
-      const speed = activeNode.speed || 1.0;
-      if (activeNode.type === 'video') {
-        // Handled by video elements onEnded or timeUpdate bounds
+      const speed = activeVisualNode.speed || 1.0;
+      if (activeVisualNode.type === 'video') {
+        // Handled by video elements timeUpdate bounds
       } else {
         // Image or Sticky slide (default 4s, scales with speed multiplier!)
-        const dur = activeNode.endTime && activeNode.startTime != null
-          ? ((activeNode.endTime - activeNode.startTime) / speed) * 1000
+        const dur = activeVisualNode.endTime && activeVisualNode.startTime != null
+          ? ((activeVisualNode.endTime - activeVisualNode.startTime) / speed) * 1000
           : 4000 / speed;
         timerRef.current = setTimeout(() => {
           handleNext();
         }, dur);
       }
     }
-  }, [currentIndex, isPlaying, isPresentationActive, activeNode]);
+  }, [currentIndex, isPlaying, activeVisualNode, connections, nodes]);
 
-  // Play video clip when active node changes
+  // Sync video source, time, play/pause, volume, speed, and scrubbing
+  const prevNodeIdRef = useRef(null);
   useEffect(() => {
-    if (isPresentationActive && activeNode && activeNode.type === 'video' && videoRef.current) {
-      videoRef.current.currentTime = activeNode.startTime;
-      videoRef.current.volume = videoTrackMuted ? 0 : activeNode.volume;
-      videoRef.current.playbackRate = activeNode.speed || 1.0;
-      if (isPlaying) {
-        videoRef.current.play().catch(err => console.log('Autoplay blocked:', err));
+    if (!videoRef.current || !activeVisualNode || activeVisualNode.type !== 'video') {
+      prevNodeIdRef.current = null;
+      return;
+    }
+
+    const video = videoRef.current;
+    
+    // 1. Handle source/clip change
+    const isNewNode = prevNodeIdRef.current !== activeVisualNode.id;
+    if (isNewNode) {
+      prevNodeIdRef.current = activeVisualNode.id;
+      const offset = cardOffsets[currentIndex];
+      const targetTime = offset ? (activeVisualNode.startTime + Math.max(0, playheadTime - offset.startOffset)) : activeVisualNode.startTime;
+      video.currentTime = targetTime;
+    }
+
+    // 2. Handle Volume and playback speed
+    video.volume = videoTrackMuted ? 0 : (activeVisualNode.volume !== undefined ? activeVisualNode.volume : 1.0);
+    video.playbackRate = activeVisualNode.speed || 1.0;
+
+    // 3. Handle playing vs paused states
+    if (isPlaying) {
+      if (video.paused) {
+        video.play().catch(err => {});
+      }
+    } else {
+      if (!video.paused) {
+        video.pause();
+      }
+      // Scrubbing sync (only when paused)
+      const offset = cardOffsets[currentIndex];
+      if (offset) {
+        const localTime = playheadTime - offset.startOffset;
+        const targetTime = activeVisualNode.startTime + localTime;
+        if (targetTime >= activeVisualNode.startTime && targetTime <= activeVisualNode.endTime) {
+          if (Math.abs(video.currentTime - targetTime) > 0.05) {
+            video.currentTime = targetTime;
+          }
+        }
       }
     }
-  }, [currentIndex, isPresentationActive, isPlaying, activeNode, videoTrackMuted]);
+  }, [currentIndex, activeVisualNode, isPlaying, playheadTime, videoTrackMuted, cardOffsets]);
 
   // Background audio: play audio tracks alongside visual slides
   useEffect(() => {
@@ -288,19 +317,26 @@ export default function Timeline({
       return;
     }
 
-    if (!isPresentationActive || !isPlaying) {
-      if (bgAudioRef.current) {
-        bgAudioRef.current.pause();
-      }
-      if (!isPresentationActive && bgAudioRef.current) {
-        bgAudioRef.current.currentTime = 0;
-      }
-      return;
-    }
-
     const timelineStart = bgTrack.timelineStart || 0;
     const duration = bgTrack.endTime - bgTrack.startTime;
     const timelineEnd = timelineStart + duration;
+
+    if (!isPlaying) {
+      if (bgAudioRef.current) {
+        bgAudioRef.current.pause();
+        // Sync seek while paused
+        if (playheadTime >= timelineStart && playheadTime <= timelineEnd) {
+          let targetAudioTime = bgTrack.startTime + (playheadTime - timelineStart);
+          if (bgTrack.loop && duration > 0) {
+            targetAudioTime = bgTrack.startTime + ((playheadTime - timelineStart) % duration);
+          }
+          if (Math.abs(bgAudioRef.current.currentTime - targetAudioTime) > 0.05) {
+            bgAudioRef.current.currentTime = targetAudioTime;
+          }
+        }
+      }
+      return;
+    }
 
     // Check if the playhead is within the audio clip's active timeline bounds
     if (playheadTime >= timelineStart && playheadTime <= timelineEnd) {
@@ -354,7 +390,7 @@ export default function Timeline({
         bgAudioRef.current.pause();
       }
     }
-  }, [isPresentationActive, isPlaying, playheadTime, backgroundAudioTracks, audioTrackMuted, audioTrackVolume]);
+  }, [isPlaying, playheadTime, backgroundAudioTracks, audioTrackMuted, audioTrackVolume]);
 
 
 
@@ -375,7 +411,7 @@ export default function Timeline({
   };
 
   const handleNext = () => {
-    const len = isPresentationActive ? visualSequence.length : sequence.length;
+    const len = visualSequence.length;
     if (currentIndex < len - 1) {
       playUISound('change');
       setCurrentIndex(prev => prev + 1);
@@ -405,11 +441,19 @@ export default function Timeline({
   };
 
   const handleVideoTimeUpdate = () => {
-    if (!videoRef.current || !activeNode) return;
+    if (!videoRef.current || !activeVisualNode) return;
     const current = videoRef.current.currentTime;
     
+    // Sync playhead time
+    if (isPlaying && !isScrubbing) {
+      const offset = cardOffsets[currentIndex];
+      if (offset) {
+        setPlayheadTime(offset.startOffset + (current - activeVisualNode.startTime));
+      }
+    }
+    
     // Cross-fade check or transition trigger
-    if (current >= activeNode.endTime) {
+    if (current >= activeVisualNode.endTime) {
       videoRef.current.pause();
       handleNext();
     }
@@ -549,16 +593,27 @@ export default function Timeline({
   const playheadIntervalRef = useRef(null);
   const trackContainerRef = useRef(null);
 
+  // Playhead auto-advance interval (only for non-video clips, e.g. images)
   useEffect(() => {
-    if (!isPresentationActive || !isPlaying) {
+    if (!isPlaying) {
       if (playheadIntervalRef.current) clearInterval(playheadIntervalRef.current);
       return;
     }
 
     playheadIntervalRef.current = setInterval(() => {
       setPlayheadTime(prev => {
-        const next = prev + 0.05;
-        if (next >= totalDuration) return totalDuration;
+        // Video nodes advance their playhead time inside handleVideoTimeUpdate
+        const currentActive = visualSequence[currentIndex];
+        if (currentActive && currentActive.type === 'video') {
+          return prev;
+        }
+
+        const speed = currentActive ? (currentActive.speed || 1.0) : 1.0;
+        const next = prev + 0.05 * speed;
+        if (next >= totalDuration) {
+          setIsPlaying(false);
+          return totalDuration;
+        }
         return next;
       });
     }, 50);
@@ -566,14 +621,20 @@ export default function Timeline({
     return () => {
       if (playheadIntervalRef.current) clearInterval(playheadIntervalRef.current);
     };
-  }, [isPresentationActive, isPlaying, totalDuration]);
+  }, [isPlaying, totalDuration, currentIndex, visualSequence]);
 
-  // Sync playhead when currentIndex changes
+  // Sync currentIndex to match the playhead position
   useEffect(() => {
-    if (currentIndex >= 0 && cardOffsets[currentIndex]) {
-      setPlayheadTime(cardOffsets[currentIndex].startOffset);
+    for (let i = 0; i < cardOffsets.length; i++) {
+      const { startOffset, duration } = cardOffsets[i];
+      if (playheadTime >= startOffset && playheadTime < startOffset + duration) {
+        if (currentIndex !== i) {
+          setCurrentIndex(i);
+        }
+        break;
+      }
     }
-  }, [currentIndex, cardOffsets]);
+  }, [playheadTime, cardOffsets, currentIndex]);
 
   // Ruler scrubbing: click/drag on ruler to seek
   const handleRulerMouseDown = (e) => {
@@ -799,11 +860,11 @@ export default function Timeline({
           {/* Controls toolbar */}
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
             <button
-              onClick={handleStartPresentation}
+              onClick={togglePlayback}
               disabled={sequence.length === 0}
               style={{
-                background: 'linear-gradient(135deg, rgba(232, 157, 108, 0.18) 0%, rgba(200, 184, 138, 0.1) 100%)',
-                border: '1px solid rgba(232, 157, 108, 0.4)',
+                background: isPlaying ? 'linear-gradient(135deg, rgba(0, 255, 255, 0.15) 0%, rgba(0, 255, 255, 0.05) 100%)' : 'linear-gradient(135deg, rgba(232, 157, 108, 0.18) 0%, rgba(200, 184, 138, 0.1) 100%)',
+                border: isPlaying ? '1px solid rgba(0, 255, 255, 0.4)' : '1px solid rgba(232, 157, 108, 0.4)',
                 borderRadius: '6px',
                 color: 'var(--text-primary)',
                 fontWeight: '600',
@@ -818,20 +879,57 @@ export default function Timeline({
               }}
               onMouseEnter={(e) => {
                 if (sequence.length === 0) return;
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(232, 157, 108, 0.28) 0%, rgba(200, 184, 138, 0.15) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(232, 157, 108, 0.7)';
-                e.currentTarget.style.boxShadow = '0 0 10px rgba(232, 157, 108, 0.3)';
+                e.currentTarget.style.background = isPlaying ? 'linear-gradient(135deg, rgba(0, 255, 255, 0.25) 0%, rgba(0, 255, 255, 0.1) 100%)' : 'linear-gradient(135deg, rgba(232, 157, 108, 0.28) 0%, rgba(200, 184, 138, 0.15) 100%)';
+                e.currentTarget.style.borderColor = isPlaying ? 'rgba(0, 255, 255, 0.7)' : 'rgba(232, 157, 108, 0.7)';
               }}
               onMouseLeave={(e) => {
                 if (sequence.length === 0) return;
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(232, 157, 108, 0.18) 0%, rgba(200, 184, 138, 0.1) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(232, 157, 108, 0.4)';
-                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.background = isPlaying ? 'linear-gradient(135deg, rgba(0, 255, 255, 0.15) 0%, rgba(0, 255, 255, 0.05) 100%)' : 'linear-gradient(135deg, rgba(232, 157, 108, 0.18) 0%, rgba(200, 184, 138, 0.1) 100%)';
+                e.currentTarget.style.borderColor = isPlaying ? 'rgba(0, 255, 255, 0.4)' : 'rgba(232, 157, 108, 0.4)';
               }}
-              title="Start linear playback sequence in presentation mode"
+              title={isPlaying ? "Pause playback" : "Play sequence"}
+            >
+              {isPlaying ? <Square size={12} fill="var(--text-primary)" /> : <Play size={12} fill="var(--text-primary)" />}
+              {isPlaying ? 'Pause' : 'Play'}
+            </button>
+
+            <button
+              onClick={() => {
+                if (sequence.length === 0) return;
+                playUISound('swell');
+                setIsPresentationActive(true);
+                setIsPlaying(true);
+              }}
+              disabled={sequence.length === 0}
+              style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid var(--border-glass)',
+                borderRadius: '6px',
+                color: 'var(--text-secondary)',
+                fontWeight: '600',
+                fontSize: '11px',
+                padding: '5px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: sequence.length === 0 ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s ease',
+                opacity: sequence.length === 0 ? 0.4 : 1
+              }}
+              onMouseEnter={(e) => {
+                if (sequence.length === 0) return;
+                e.currentTarget.style.color = 'var(--text-primary)';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+              }}
+              onMouseLeave={(e) => {
+                if (sequence.length === 0) return;
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+              }}
+              title="Enter fullscreen presentation mode"
             >
               <Film size={12} />
-              Play
+              Present
             </button>
 
             <select
@@ -1605,7 +1703,7 @@ export default function Timeline({
       <audio ref={bgAudioRef} style={{ display: 'none' }} />
 
       {/* Fullscreen Presentation Mode Shield */}
-      {isPresentationActive && activeNode && (
+      {isPresentationActive && activeVisualNode && (
         <div 
           className="presentation-shield active"
           style={{
@@ -1638,15 +1736,15 @@ export default function Timeline({
           >
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '18px', color: 'white' }}>
-                {activeNode.name}
+                {activeVisualNode.name}
               </span>
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Slide {currentIndex + 1} of {sequence.length}
+                Slide {currentIndex + 1} of {visualSequence.length}
               </span>
             </div>
             
             <button 
-              onClick={handleStopPresentation}
+              onClick={() => setIsPresentationActive(false)}
               style={{
                 width: '36px',
                 height: '36px',
@@ -1662,6 +1760,7 @@ export default function Timeline({
               }}
               onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
               onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+              title="Minimize to Program Monitor"
             >
               <X size={16} />
             </button>
@@ -1677,14 +1776,14 @@ export default function Timeline({
           >
             
             {/* VIDEO NODE PLAYBACK */}
-            {activeNode.type === 'video' && (
+            {activeVisualNode.type === 'video' && (
               <video 
                 ref={videoRef}
-                src={activeNode.url}
+                src={activeVisualNode.url}
                 className="presentation-video"
                 onTimeUpdate={handleVideoTimeUpdate}
-                volume={activeNode.volume}
-                style={{ filter: getFilterCss(activeNode.filter), opacity: videoTrackVisible ? 1 : 0 }}
+                volume={activeVisualNode.volume}
+                style={{ filter: getFilterCss(activeVisualNode.filter), opacity: videoTrackVisible ? 1 : 0 }}
                 playsInline
                 autoPlay
               />
@@ -1693,15 +1792,15 @@ export default function Timeline({
 
 
             {/* IMAGE NODE PLAYBACK */}
-            {activeNode.type === 'image' && (
+            {activeVisualNode.type === 'image' && (
               <img 
-                src={activeNode.url} 
-                alt={activeNode.name}
+                src={activeVisualNode.url} 
+                alt={activeVisualNode.name}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '100%',
                   objectFit: 'contain',
-                  filter: getFilterCss(activeNode.filter),
+                  filter: getFilterCss(activeVisualNode.filter),
                   opacity: videoTrackVisible ? 1 : 0
                 }}
               />
@@ -1775,6 +1874,148 @@ export default function Timeline({
             </button>
           </div>
 
+        </div>
+      )}
+
+      {/* Floating Program Monitor (Editing Mode Preview Panel) */}
+      {!isPresentationActive && sequence.length > 0 && activeVisualNode && (
+        <div 
+          className="glass-panel program-monitor"
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '24px',
+            width: '280px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-glass)',
+            background: 'var(--bg-panel)',
+            backdropFilter: 'blur(16px)',
+            boxShadow: 'var(--shadow-premium)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            zIndex: 100,
+            pointerEvents: 'auto',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'rgba(0, 0, 0, 0.25)',
+            userSelect: 'none'
+          }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Film size={11} style={{ color: 'var(--accent-cyan)' }} />
+              Program Monitor
+            </span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                onClick={() => {
+                  playUISound('swell');
+                  setIsPresentationActive(true);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '2px',
+                  borderRadius: '4px',
+                  transition: 'color 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                title="Enter Fullscreen Presentation"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Screen Content with transition animation wrapper */}
+          <div 
+            className={`presentation-video-container ${activeTransition ? `${activeTransition}-transition` : ''}`}
+            style={{
+              position: 'relative',
+              width: '100%',
+              aspectRatio: aspectRatio === '16:9' ? '16/9' : aspectRatio === '9:16' ? '9/16' : '1/1',
+              background: '#040508',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+              borderRadius: 0,
+              border: 'none',
+              boxShadow: 'none',
+              height: 'auto',
+              '--trans-dur': `${activeTransDuration}s`
+            }}
+          >
+            {/* VIDEO NODE PLAYBACK */}
+            {activeVisualNode.type === 'video' && (
+              <video 
+                ref={videoRef}
+                src={activeVisualNode.url}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  filter: getFilterCss(activeVisualNode.filter),
+                  opacity: videoTrackVisible ? 1 : 0
+                }}
+                onTimeUpdate={handleVideoTimeUpdate}
+                playsInline
+              />
+            )}
+
+            {/* IMAGE NODE PLAYBACK */}
+            {activeVisualNode.type === 'image' && (
+              <img 
+                src={activeVisualNode.url} 
+                alt={activeVisualNode.name}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  filter: getFilterCss(activeVisualNode.filter),
+                  opacity: videoTrackVisible ? 1 : 0
+                }}
+              />
+            )}
+
+            {/* Subtitles Overlay inside the Monitor */}
+            {activeSubtitle && textTrackVisible && (
+              <div style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                right: '10px',
+                background: 'rgba(0, 0, 0, 0.75)',
+                color: 'white',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '10px',
+                textAlign: 'center',
+                fontFamily: 'var(--font-body)',
+                pointerEvents: 'none',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                {activeSubtitle}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </>

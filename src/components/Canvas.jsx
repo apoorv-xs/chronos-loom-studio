@@ -1806,12 +1806,14 @@ export default function Canvas({
       <div 
         style={{
           position: 'absolute',
-          top: '20px',
-          right: '24px',
+          bottom: isTimelineOpen ? '270px' : '24px',
+          left: isSidebarOpen ? '300px' : '24px',
           display: 'flex',
           flexDirection: 'column',
           gap: '8px',
-          pointerEvents: 'auto'
+          pointerEvents: 'auto',
+          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          zIndex: 90
         }}
       >
         <div 
