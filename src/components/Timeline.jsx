@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Square, SkipForward, SkipBack, X, Film, AlertCircle, ChevronDown, Download, Upload, Scissors, Music, Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Type } from 'lucide-react';
+import { Play, Square, SkipForward, SkipBack, X, Film, AlertCircle, ChevronDown, Download, Upload, Scissors, Music, Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Type, FileText } from 'lucide-react';
 import { generateFcpXml } from '../utils/fcpXmlGenerator';
 import { parseFcpXml } from '../utils/fcpXmlParser';
 import { getFilterCss } from './Canvas';
@@ -34,6 +34,20 @@ export default function Timeline({
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [trimming, setTrimming] = useState(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isExportingVideo, setIsExportingVideo] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportStatus, setExportStatus] = useState('');
+
+  const videoSourceRef = useRef(null);
+  const audioSourceRef = useRef(null);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClose = () => setShowExportMenu(false);
+    window.addEventListener('click', handleClose);
+    return () => window.removeEventListener('click', handleClose);
+  }, [showExportMenu]);
 
   const fileInputRef = useRef(null);
 
@@ -201,6 +215,289 @@ export default function Timeline({
       console.error('Failed to generate or download FCP XML:', err);
     }
   }, [sequence, connections, exportFramerate]);
+
+  const startVideoExport = async () => {
+    if (sequence.length === 0) return;
+    
+    // Stop any current playback
+    setIsPlaying(false);
+    
+    // Show modal
+    setIsExportingVideo(true);
+    setExportProgress(0);
+    setExportStatus('Initializing export elements...');
+    
+    // Set playhead to 0
+    setPlayheadTime(0);
+    setCurrentIndex(0);
+    
+    // Wait for DOM to stabilize
+    await new Promise(r => setTimeout(r, 600));
+    
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // Get the media elements
+      const videoElement = videoRef.current;
+      const audioElement = bgAudioRef.current;
+      
+      if (!videoElement) {
+        throw new Error("Preview monitor video player not found.");
+      }
+      
+      // Setup Web Audio routing
+      let videoSource;
+      let audioSource;
+      
+      // Use refs to prevent double-connecting errors
+      if (!videoSourceRef.current) {
+        videoSourceRef.current = audioCtx.createMediaElementSource(videoElement);
+      }
+      videoSource = videoSourceRef.current;
+      
+      if (audioElement) {
+        if (!audioSourceRef.current) {
+          audioSourceRef.current = audioCtx.createMediaElementSource(audioElement);
+        }
+        audioSource = audioSourceRef.current;
+      }
+      
+      const dest = audioCtx.createMediaStreamDestination();
+      
+      // Connect to destination stream and speakers
+      videoSource.disconnect(); // Clear any old connections
+      videoSource.connect(dest);
+      videoSource.connect(audioCtx.destination);
+      
+      if (audioSource) {
+        audioSource.disconnect();
+        audioSource.connect(dest);
+        audioSource.connect(audioCtx.destination);
+      }
+      
+      // Create offscreen canvas for rendering
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d');
+      
+      // Capture canvas stream at 30 fps
+      const canvasStream = canvas.captureStream(30);
+      const audioStream = dest.stream;
+      
+      const tracks = [];
+      if (canvasStream.getVideoTracks().length > 0) {
+        tracks.push(canvasStream.getVideoTracks()[0]);
+      }
+      if (audioStream.getAudioTracks().length > 0) {
+        tracks.push(audioStream.getAudioTracks()[0]);
+      }
+      
+      const combinedStream = new MediaStream(tracks);
+      
+      // Select best supported MIME type
+      let mimeType = 'video/webm';
+      let fileExt = '.mp4'; // Download extension
+      
+      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+        mimeType = 'video/mp4;codecs=avc1';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+        mimeType = 'video/webm;codecs=vp9,opus';
+        fileExt = '.webm';
+      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+        mimeType = 'video/webm;codecs=vp8,opus';
+        fileExt = '.webm';
+      }
+      
+      const chunks = [];
+      const recorder = new MediaRecorder(combinedStream, { mimeType });
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+      
+      // Keep track of original mute/volume states so we can restore them later
+      const originalVideoMute = videoTrackMuted;
+      const originalAudioMute = audioTrackMuted;
+      
+      // Unmute tracks for rendering so MediaRecorder captures audio
+      setVideoTrackMuted(false);
+      setAudioTrackMuted(false);
+      
+      // Start recording
+      recorder.start();
+      setExportStatus('Recording video feed...');
+      
+      // Start playing
+      setIsPlaying(true);
+      
+      const startTime = Date.now();
+      const duration = totalDuration;
+      
+      // We will also render a preview in the progress modal if possible
+      const modalPreviewCanvas = document.getElementById('export-preview-canvas');
+      const modalPreviewCtx = modalPreviewCanvas?.getContext('2d');
+      
+      // Active transition tracking variables
+      let lastIndex = 0;
+      let transitionStart = 0;
+      
+      const renderFrame = () => {
+        if (!recorder || recorder.state === 'inactive') return;
+        
+        const elapsed = (Date.now() - startTime) / 1000;
+        setExportProgress(Math.min(100, Math.round((elapsed / duration) * 100)));
+        
+        // Draw black background
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Find currently active visual element in DOM
+        const activeNode = visualSequence[currentIndex];
+        
+        if (activeNode) {
+          ctx.save();
+          
+          // Apply active filter
+          const filterCss = getFilterCss(activeNode.filter);
+          ctx.filter = filterCss === 'none' ? 'none' : filterCss;
+          
+          // Detect transition triggers
+          if (currentIndex !== lastIndex) {
+            transitionStart = elapsed;
+            lastIndex = currentIndex;
+          }
+          
+          // Apply active transitions
+          if (activeTransition && activeTransDuration > 0) {
+            const t = (elapsed - transitionStart) / activeTransDuration;
+            if (t >= 0 && t <= 1.0) {
+              if (activeTransition === 'fade') {
+                ctx.globalAlpha = t;
+              } else if (activeTransition === 'slide') {
+                ctx.globalAlpha = t;
+                ctx.translate(100 * (1 - t), 0);
+              } else if (activeTransition === 'zoom') {
+                ctx.globalAlpha = t;
+                const s = 0.85 + 0.15 * t;
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.scale(s, s);
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
+              } else if (activeTransition === 'dissolve') {
+                ctx.globalAlpha = t;
+                ctx.filter = `blur(${8 * (1 - t)}px) ${filterCss === 'none' ? '' : filterCss}`;
+              }
+            }
+          }
+          
+          // Draw video/image
+          if (activeNode.type === 'video' && videoRef.current) {
+            // Check aspect ratio and letterbox if needed
+            const vW = videoRef.current.videoWidth || 1280;
+            const vH = videoRef.current.videoHeight || 720;
+            const targetRatio = 1280 / 720;
+            const sourceRatio = vW / vH;
+            
+            if (sourceRatio > targetRatio) {
+              const h = 1280 / sourceRatio;
+              ctx.drawImage(videoRef.current, 0, (720 - h) / 2, 1280, h);
+            } else {
+              const w = 720 * sourceRatio;
+              ctx.drawImage(videoRef.current, (1280 - w) / 2, 0, w, 720);
+            }
+          } else if (activeNode.type === 'image') {
+            const imgEl = document.querySelector('.presentation-video-container img');
+            if (imgEl) {
+              const iW = imgEl.naturalWidth || 1280;
+              const iH = imgEl.naturalHeight || 720;
+              const targetRatio = 1280 / 720;
+              const sourceRatio = iW / iH;
+              
+              if (sourceRatio > targetRatio) {
+                const h = 1280 / sourceRatio;
+                ctx.drawImage(imgEl, 0, (720 - h) / 2, 1280, h);
+              } else {
+                const w = 720 * sourceRatio;
+                ctx.drawImage(imgEl, (1280 - w) / 2, 0, w, 720);
+              }
+            }
+          }
+          
+          ctx.restore();
+        }
+        
+        // Draw subtitle overlay
+        if (activeSubtitle && textTrackVisible) {
+          ctx.save();
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+          ctx.font = 'bold 24px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          const textWidth = ctx.measureText(activeSubtitle).width;
+          const rectW = textWidth + 40;
+          const rectH = 50;
+          const rectX = (canvas.width - rectW) / 2;
+          const rectY = canvas.height - 100;
+          
+          // Rounded rect
+          ctx.beginPath();
+          ctx.roundRect ? ctx.roundRect(rectX, rectY, rectW, rectH, 12) : ctx.rect(rectX, rectY, rectW, rectH);
+          ctx.fill();
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(activeSubtitle, canvas.width / 2, rectY + rectH / 2);
+          ctx.restore();
+        }
+        
+        // Copy to modal preview canvas
+        if (modalPreviewCanvas && modalPreviewCtx) {
+          modalPreviewCtx.drawImage(canvas, 0, 0, modalPreviewCanvas.width, modalPreviewCanvas.height);
+        }
+        
+        // Check for end of sequence
+        if (elapsed < duration) {
+          requestAnimationFrame(renderFrame);
+        } else {
+          // Finish recording
+          setExportStatus('Wrapping up video file...');
+          setIsPlaying(false);
+          
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `chronos_timeline_export${fileExt}`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            // Clean up & restore states
+            setVideoTrackMuted(originalVideoMute);
+            setAudioTrackMuted(originalAudioMute);
+            setIsExportingVideo(false);
+            audioCtx.close();
+            playUISound('swell');
+          };
+          recorder.stop();
+        }
+      };
+      
+      requestAnimationFrame(renderFrame);
+      
+    } catch (err) {
+      console.error("Video export failed:", err);
+      alert("Failed to export video. Make sure all video elements are loaded and cross-origin permissions are allowed.");
+      setIsExportingVideo(false);
+      setIsPlaying(false);
+    }
+  };
 
   // Intercept Ctrl+S / Cmd+S to export the XML project file
   useEffect(() => {
@@ -1159,84 +1456,123 @@ export default function Timeline({
               </button>
             </div>
 
-            <input 
-              type="file" 
-              accept=".xml" 
-              ref={fileInputRef} 
-              onChange={handleImportXml} 
-              style={{ display: 'none' }} 
-            />
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (sequence.length > 0) {
+                    setShowExportMenu(!showExportMenu);
+                    playUISound('click');
+                  }
+                }}
+                disabled={sequence.length === 0}
+                className="btn-nle-export"
+                title="Export timeline options"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(163, 177, 155, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)',
+                  border: '1px solid rgba(163, 177, 155, 0.4)',
+                  borderRadius: '6px',
+                  color: 'var(--text-primary)',
+                  fontWeight: '600',
+                  fontSize: '11px',
+                  padding: '5px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: sequence.length === 0 ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease',
+                  opacity: sequence.length === 0 ? 0.4 : 1
+                }}
+                onMouseEnter={(e) => {
+                  if (sequence.length === 0) return;
+                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(163, 177, 155, 0.25) 0%, rgba(200, 184, 138, 0.12) 100%)';
+                  e.currentTarget.style.borderColor = 'rgba(163, 177, 155, 0.7)';
+                  e.currentTarget.style.boxShadow = '0 0 10px rgba(163, 177, 155, 0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  if (sequence.length === 0) return;
+                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(163, 177, 155, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)';
+                  e.currentTarget.style.borderColor = 'rgba(163, 177, 155, 0.4)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <Download size={12} />
+                Export
+                <ChevronDown size={10} style={{ marginLeft: '2px', transform: showExportMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+              </button>
 
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="btn-nle-export"
-              title="Import FCP7 XML timeline file"
-              style={{
-                background: 'linear-gradient(135deg, rgba(168, 162, 158, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)',
-                border: '1px solid rgba(168, 162, 158, 0.4)',
-                borderRadius: '6px',
-                color: 'var(--text-primary)',
-                fontWeight: '600',
-                fontSize: '11px',
-                padding: '5px 10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                marginRight: '2px'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(168, 162, 158, 0.25) 0%, rgba(200, 184, 138, 0.12) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(168, 162, 158, 0.7)';
-                e.currentTarget.style.boxShadow = '0 0 10px rgba(168, 162, 158, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(168, 162, 158, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(168, 162, 158, 0.4)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <Upload size={12} />
-              Import
-            </button>
-
-            <button
-              onClick={handleExportXml}
-              disabled={sequence.length === 0}
-              className="btn-nle-export"
-              title="Export FCP7 XML timeline file for Premiere, Resolve, or Filmora"
-              style={{
-                background: 'linear-gradient(135deg, rgba(163, 177, 155, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)',
-                border: '1px solid rgba(163, 177, 155, 0.4)',
-                borderRadius: '6px',
-                color: 'var(--text-primary)',
-                fontWeight: '600',
-                fontSize: '11px',
-                padding: '5px 10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                cursor: sequence.length === 0 ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s ease',
-                opacity: sequence.length === 0 ? 0.4 : 1
-              }}
-              onMouseEnter={(e) => {
-                if (sequence.length === 0) return;
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(163, 177, 155, 0.25) 0%, rgba(200, 184, 138, 0.12) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(163, 177, 155, 0.7)';
-                e.currentTarget.style.boxShadow = '0 0 10px rgba(163, 177, 155, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                if (sequence.length === 0) return;
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(163, 177, 155, 0.15) 0%, rgba(200, 184, 138, 0.08) 100%)';
-                e.currentTarget.style.borderColor = 'rgba(163, 177, 155, 0.4)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <Download size={12} />
-              Export
-            </button>
+              {showExportMenu && (
+                <div 
+                  className="glass-panel"
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    right: 0,
+                    width: '180px',
+                    borderRadius: '8px',
+                    padding: '6px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    zIndex: 200,
+                    border: '1px solid var(--border-glass)',
+                    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+                    pointerEvents: 'auto'
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      handleExportXml();
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '8px 10px',
+                      color: 'var(--text-primary)',
+                      fontSize: '11px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    <FileText size={12} style={{ color: 'var(--accent-cyan)' }} />
+                    Export FCP7 XML (.xml)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      startVideoExport();
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '8px 10px',
+                      color: 'var(--text-primary)',
+                      fontSize: '11px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    <Film size={12} style={{ color: 'var(--accent-orange)' }} />
+                    Export MP4 Video (.mp4)
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Collapse Button */}
             <button
@@ -2268,6 +2604,133 @@ export default function Timeline({
             className="resize-handle"
             onMouseDown={handleMonitorResizeMouseDown}
           />
+        </div>
+      )}
+
+      {isExportingVideo && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(5, 7, 10, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-display)',
+            backdropFilter: 'blur(10px)',
+            pointerEvents: 'auto'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div 
+            className="glass-panel"
+            style={{
+              width: '460px',
+              padding: '30px',
+              borderRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              border: '1px solid var(--border-glass-glow)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
+              textAlign: 'center'
+            }}
+          >
+            <Film size={32} className="text-amber-500" style={{ color: 'var(--accent-orange)', marginBottom: '16px', animation: 'pulse 2s infinite' }} />
+            
+            <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '6px' }}>
+              Rendering Timeline
+            </h3>
+            
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Do not close this tab. Processing audio and video tracks...
+            </p>
+
+            {/* Live Render Preview Canvas */}
+            <div 
+              style={{ 
+                width: '320px', 
+                height: '180px', 
+                borderRadius: '8px', 
+                overflow: 'hidden', 
+                background: '#000', 
+                border: '1px solid var(--border-glass)',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative'
+              }}
+            >
+              <canvas id="export-preview-canvas" width={320} height={180} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <div 
+                style={{ 
+                  position: 'absolute', 
+                  top: '8px', 
+                  right: '8px', 
+                  background: 'rgba(239, 68, 68, 0.85)', 
+                  color: 'white', 
+                  fontSize: '8px', 
+                  fontWeight: 'bold', 
+                  padding: '2px 6px', 
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}
+              >
+                Rec
+              </div>
+            </div>
+
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+              <span>{exportStatus}</span>
+              <span>{exportProgress}%</span>
+            </div>
+
+            {/* Progress Bar Container */}
+            <div style={{ width: '100%', height: '6px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '3px', overflow: 'hidden', marginBottom: '24px' }}>
+              <div 
+                style={{ 
+                  width: `${exportProgress}%`, 
+                  height: '100%', 
+                  background: 'linear-gradient(90deg, var(--accent-orange) 0%, var(--accent-pink) 100%)', 
+                  borderRadius: '3px',
+                  transition: 'width 0.1s linear'
+                }} 
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                window.location.reload();
+              }}
+              style={{
+                background: 'rgba(255, 59, 48, 0.1)',
+                border: '1px solid rgba(255, 59, 48, 0.3)',
+                borderRadius: '8px',
+                color: '#ff3b30',
+                fontSize: '12px',
+                padding: '8px 16px',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 59, 48, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(255, 59, 48, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 59, 48, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(255, 59, 48, 0.3)';
+              }}
+            >
+              Cancel Render
+            </button>
+          </div>
         </div>
       )}
     </>
