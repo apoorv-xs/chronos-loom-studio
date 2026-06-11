@@ -192,7 +192,7 @@ export function generateFcpXml(sequence, connections, framerate = 30, sequenceNa
   
   // Serialize chronos node metadata (like sticky notes, positions, and links)
   const metaObj = {
-    nodes: sequence.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, width: n.width, color: n.color, locked: n.locked, text: n.text })),
+    nodes: sequence.map(n => ({ id: n.id, type: n.type, name: n.name, url: n.url, x: n.x, y: n.y, width: n.width, color: n.color, locked: n.locked, text: n.text })),
     connections: actualConnections
   };
   const jsonMeta = escapeXml(JSON.stringify(metaObj));
