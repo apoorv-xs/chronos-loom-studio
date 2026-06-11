@@ -33,7 +33,8 @@ export function parseFcpXml(xmlString) {
           if (matchingClip) {
             const name = matchingClip.querySelector("name")?.textContent || mNode.name;
             let pathUrl = matchingClip.querySelector("pathurl")?.textContent || '';
-            if (pathUrl.startsWith("file://localhost/placeholder/")) {
+            const isPlaceholder = pathUrl.startsWith("file://localhost/placeholder/");
+            if (isPlaceholder) {
               pathUrl = decodeURIComponent(pathUrl.replace("file://localhost/placeholder/", ""));
             }
 
@@ -55,7 +56,13 @@ export function parseFcpXml(xmlString) {
             }
 
             let resolvedUrl = mNode.url || pathUrl;
-            if (!resolvedUrl || resolvedUrl.startsWith("blob:") || resolvedUrl.startsWith("file://")) {
+            const isInvalidOrLocal = !resolvedUrl || 
+                                     resolvedUrl.startsWith("blob:") || 
+                                     resolvedUrl.startsWith("file://") || 
+                                     !resolvedUrl.includes("://") ||
+                                     isPlaceholder;
+
+            if (isInvalidOrLocal) {
               resolvedUrl = actualType === 'audio'
                 ? 'https://assets.mixkit.co/music/preview/mixkit-epic-story-1078.mp3'
                 : 'https://media.w3.org/2010/05/sintel/trailer.mp4';
@@ -108,10 +115,11 @@ export function parseFcpXml(xmlString) {
   videoClips.forEach((clip, idx) => {
     const name = clip.querySelector("name")?.textContent || `Clip ${idx + 1}`;
     let pathUrl = clip.querySelector("pathurl")?.textContent || '';
-    if (pathUrl.startsWith("file://localhost/placeholder/")) {
+    const isPlaceholder = pathUrl.startsWith("file://localhost/placeholder/");
+    if (isPlaceholder) {
       pathUrl = decodeURIComponent(pathUrl.replace("file://localhost/placeholder/", ""));
     }
-    if (!pathUrl || pathUrl.startsWith("file://")) {
+    if (isPlaceholder || !pathUrl || pathUrl.startsWith("file://") || !pathUrl.includes("://")) {
       pathUrl = 'https://media.w3.org/2010/05/sintel/trailer.mp4'; // fallback
     }
 
@@ -163,10 +171,11 @@ export function parseFcpXml(xmlString) {
   audioClips.forEach((clip, idx) => {
     const name = clip.querySelector("name")?.textContent || `Audio ${idx + 1}`;
     let pathUrl = clip.querySelector("pathurl")?.textContent || '';
-    if (pathUrl.startsWith("file://localhost/placeholder/")) {
+    const isPlaceholder = pathUrl.startsWith("file://localhost/placeholder/");
+    if (isPlaceholder) {
       pathUrl = decodeURIComponent(pathUrl.replace("file://localhost/placeholder/", ""));
     }
-    if (!pathUrl || pathUrl.startsWith("file://")) {
+    if (isPlaceholder || !pathUrl || pathUrl.startsWith("file://") || !pathUrl.includes("://")) {
       pathUrl = 'https://assets.mixkit.co/music/preview/mixkit-epic-story-1078.mp3'; // fallback
     }
 
