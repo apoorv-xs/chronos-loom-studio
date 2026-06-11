@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Square, SkipForward, SkipBack, X, Film, AlertCircle, ChevronDown, Download, Scissors, Music, Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Type } from 'lucide-react';
 import { generateFcpXml } from '../utils/fcpXmlGenerator';
 import { getFilterCss } from './Canvas';
@@ -38,6 +38,7 @@ export default function Timeline({
   const [isDraggingMonitor, setIsDraggingMonitor] = useState(false);
   const [monitorWidth, setMonitorWidth] = useState(280);
   const [isResizingMonitor, setIsResizingMonitor] = useState(false);
+  const [isMonitorHovered, setIsMonitorHovered] = useState(false);
   const monitorDragStartRef = useRef({ mouseX: 0, mouseY: 0, monitorX: 0, monitorY: 0 });
   const monitorResizeStartRef = useRef({ mouseX: 0, startWidth: 0 });
 
@@ -502,7 +503,7 @@ export default function Timeline({
     }
   };
 
-  const togglePlayback = () => {
+  const togglePlayback = useCallback(() => {
     playUISound('click');
     setIsPlaying(prev => {
       const nextPlay = !prev;
@@ -512,7 +513,25 @@ export default function Timeline({
       }
       return nextPlay;
     });
-  };
+  }, [setIsPlaying]);
+
+  // Global Spacebar Keydown Listener for Play/Pause
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const tag = e.target.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) {
+        return;
+      }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlayback();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [togglePlayback]);
 
   const handleVideoTimeUpdate = () => {
     if (!videoRef.current || !activeVisualNode) return;
@@ -1994,7 +2013,30 @@ export default function Timeline({
               <Film size={11} style={{ color: 'var(--accent-cyan)' }} />
               Program Monitor
             </span>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {/* Play/Pause Button in Header */}
+              <button
+                onClick={togglePlayback}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isPlaying ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '2px',
+                  borderRadius: '4px',
+                  transition: 'color 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = isPlaying ? 'var(--accent-cyan)' : 'var(--text-muted)'}
+                title={isPlaying ? "Pause playback" : "Play sequence"}
+              >
+                {isPlaying ? <Square size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
+              </button>
+
+              {/* Maximize Button */}
               <button
                 onClick={() => {
                   playUISound('swell');
@@ -2026,6 +2068,8 @@ export default function Timeline({
           {/* Screen Content with transition animation wrapper */}
           <div 
             className={`presentation-video-container ${activeTransition ? `${activeTransition}-transition` : ''}`}
+            onMouseEnter={() => setIsMonitorHovered(true)}
+            onMouseLeave={() => setIsMonitorHovered(false)}
             style={{
               position: 'relative',
               width: '100%',
@@ -2072,6 +2116,42 @@ export default function Timeline({
                   opacity: videoTrackVisible ? 1 : 0
                 }}
               />
+            )}
+
+            {/* Play/Pause Hover Overlay */}
+            {isMonitorHovered && (
+              <button
+                onClick={togglePlayback}
+                style={{
+                  position: 'absolute',
+                  zIndex: 20,
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  background: 'rgba(13, 13, 14, 0.75)',
+                  backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                  animation: 'fadeIn 0.2s ease',
+                  outline: 'none',
+                  transition: 'transform 0.2s, border-color 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.35)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+                }}
+              >
+                {isPlaying ? <Square size={12} fill="white" /> : <Play size={12} fill="white" style={{ marginLeft: '2px' }} />}
+              </button>
             )}
 
             {/* Subtitles Overlay inside the Monitor */}
