@@ -1284,8 +1284,8 @@ export default function Canvas({
                 background: node.type === 'sticky' ? '#E2DCD2' : 'var(--bg-panel)',
                 color: node.type === 'sticky' ? '#121211' : 'var(--text-primary)',
                 boxShadow: isSelected 
-                  ? `0 0 25px -5px ${node.color || 'var(--border-glass-glow)'}, var(--shadow-premium)` 
-                  : `0 0 12px -3px ${node.color || 'transparent'}, var(--shadow-premium)`
+                  ? `0 0 25px -5px ${node.color || 'var(--border-glass-glow)'}, 0 12px 40px rgba(0, 0, 0, 0.75), var(--shadow-premium)` 
+                  : `0 0 12px -3px ${node.color || 'transparent'}, 0 4px 16px rgba(0, 0, 0, 0.5), var(--shadow-premium)`
               }}
               onMouseDown={(e) => {
                 e.stopPropagation();
